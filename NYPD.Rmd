@@ -1,0 +1,236 @@
+---
+title: "NYPD_Shooting_Incident_Report"
+author: "Milad"
+date: "2023-05-12"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r setting CRAN mirror, include=FALSE}
+options(repos = "https://cran.rstudio.com/")
+```
+
+```{r package installation, message=FALSE, warning=FALSE}
+# Install required packages
+if (!requireNamespace("plotly", quietly = TRUE)) {
+  install.packages("plotly")
+}
+if (!requireNamespace("ggplot2", quietly = TRUE)) {
+  install.packages("ggplot2")
+}
+if (!requireNamespace("dplyr", quietly = TRUE)) {
+  install.packages("dplyr")
+}
+if (!requireNamespace("forcats", quietly = TRUE)) {
+  install.packages("forcats")
+}
+
+if (!requireNamespace("htmltools", quietly = TRUE)) {
+  install.packages("htmltools")
+}
+
+if (!requireNamespace("htmlwidgets", quietly = TRUE)) {
+  install.packages("htmlwidgets")
+}
+
+if (!requireNamespace("corrplot", quietly = TRUE)) {
+  install.packages("corrplot")
+}
+
+# Load required packages
+library(plotly)
+library(ggplot2)
+library(dplyr)
+library(forcats)
+library(htmltools)
+library(htmlwidgets)
+library(corrplot)
+```
+
+<!--## R Markdown-->
+
+In this report, we are trying to investigate the **NYPD Shooting Incident** which related data can be found at  <https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD>.
+
+We provide the path for our read_csv function:
+
+```{r Importing Data}
+nypd_data <- read.csv("C:/Users/Milad/MSDS/MSDS_prerequisite/DataScienceAsAField/Project/NYPD.csv")
+head(nypd_data)
+summary(nypd_data)
+```
+We can print out all the column names to get an idea which columns we may be interested in further analysis on:
+```{r column names}
+column_names <- names(nypd_data)
+num_columns <- ncol(nypd_data)
+num_columns <- length(column_names)
+for (i in 1:num_columns) {
+  cat(i, ": ", column_names[i], "\n")
+}
+
+```
+Now we can see how many total records we have and how many missing values we are dealing with:
+
+```{r missing data}
+missing_values <- colSums(is.na(nypd_data))
+total_missing_values <- sum(missing_values)
+print(paste("total_missing: ",total_missing_values))
+total_rows <- nrow(nypd_data)
+print(paste("total_rows: ",total_rows))
+```
+For now it seems we can safely disregard the missing values as their ratio compared to the total number of records is negligible.
+First, Let's plot the aggregated occurence_time over the years to see their distribution in two-hour intervals:
+
+Note: The following plots are interactive. You can hover over the desired bin to see the exact number of records for that bin.
+
+```{r occur_time histogram}
+nypd_data$OCCUR_TIME <- as.POSIXct(nypd_data$OCCUR_TIME, format = "%H:%M:%S")
+
+# Extract the hours from the occurrence time
+nypd_data$HOUR <- as.numeric(format(nypd_data$OCCUR_TIME, "%H"))
+
+# Create bins for two-hour intervals
+nypd_data$TIME_BIN <- cut(nypd_data$HOUR, breaks = seq(0, 24, by = 2))
+
+# Aggregate the data by time bin, calculating the counts
+agg_data <- aggregate(HOUR ~ TIME_BIN, data = nypd_data, FUN = length)
+colnames(agg_data) <- c("TIME_BIN", "COUNT")
+
+# Create the bar plot with aggregated data
+p <- ggplot(agg_data, aes(x = TIME_BIN, y = COUNT)) +
+  geom_bar(fill = "skyblue", stat = "identity") +
+  labs(x = "Time Interval", y = "Count", title = "Distribution of Occurrence Time in Two-Hour Intervals\n (Aggregated over Years)")
+
+# Convert the plot to an interactive version with tooltips
+plotly_plot <- ggplotly(p, tooltip = c("x", "y"))
+
+# Print the interactive plot
+plotly_plot
+```
+A quick glance at the above illustration reveals that the most shooting incidents have happened between 8:00 PM and 10:00 PM. The second most "dangerous time window" is 12:00 AM and 2:00 AM.
+```{r borough bar plot}
+plot_data <- data.frame(BORO = nypd_data$BORO)
+
+# Create the bar plot
+p <- ggplot(plot_data, aes(x = BORO)) +
+  geom_bar(fill = "skyblue") +
+  labs(x = "Borough", y = "Count", title = "Distribution of Occurrence by Borough")
+
+# Convert the plot to an interactive version with tooltips
+plotly_plot <- ggplotly(p, tooltip = c("x", "y"))
+
+# Print the interactive plot
+plotly_plot
+```
+We don't know the population of different boroughs compared to each other so it may not be an accurate observation to say Brooklyn is the most dangerous borough with most incidents just because Brooklyn has the highest count in boroughs(with 10933 incidents) as Brooklyn may have more population causing the higher number of incidents. We may need to be able to join that data from another data source to this one for further analysis that may be beyond the scope of this project.\n
+
+Now,Let's look athe perpetrator's race:
+
+
+**note**: In the following illustration, we have grouped all the "","(null)" and "UNKNOWN" perp's race into one bin as "missing".
+**Additional note**: In this part I wasn't able to render the interactive plot successfully in the output html althought the code was producing the plot in the console so as an alternative, I saved the plot as a standalone html plot using the savewidget gadget and included the plot by using the htmltools' includeHTML().
+```{r perpet_race plot}
+
+filtered_data <- nypd_data %>%
+  mutate(PERP_RACE_AGG = case_when(
+    PERP_RACE %in% c("", "(null)", "UNKNOWN") ~ "missing",
+    PERP_RACE == "WHITE" ~ "White",
+    PERP_RACE == "WHITE HISPANIC" ~ "White Hispanic",
+    PERP_RACE == "BLACK" ~ "Black",
+    PERP_RACE == "BLACK HISPANIC" ~ "Black Hispanic",
+    PERP_RACE == "ASIAN / PACIFIC ISLANDER" ~ "Asian/P.I.",
+    PERP_RACE == "AMERICAN INDIAN/ALASKAN NATIVE" ~ "Native",
+    TRUE ~ "Other Races"
+  ))
+
+#debug the filtered_data
+#summary(filtered_data)
+
+# Aggregate the data by perpetrator's race
+agg_data <- filtered_data %>%
+  count(PERP_RACE_AGG, name = "COUNT")
+
+# Create the bar plot with aggregated data
+p <- ggplot(agg_data, aes(x = PERP_RACE_AGG, y = COUNT, text = paste("Perpetrator's Race: ", PERP_RACE_AGG, "<br>Count: ", COUNT))) +
+  geom_bar(fill = "skyblue", stat = "identity") +
+  labs(x = "Perpetrator's Race", y = "Count", title = "Distribution of Occurrence by Perpetrator's Race")
+
+# Convert the plot to an interactive version with tooltips
+plotly_plot <- ggplotly(p, tooltip = "text",width = 800, height = 600)
+
+# Save the plotly plot as a standalone HTML file
+saveWidget(plotly_plot, file = "perp_race_plot.html")
+
+# Print the interactive plot
+#print(plotly_plot)
+
+# Include the HTML file in the R Markdown document
+htmltools::includeHTML("perp_race_plot.html")
+
+```
+One important bias in the dataset that we have to note is regarding the perpetrator's race that the above figure illustrates. As we can note there are two prominent columns in that distribution: 'missing' values which amount to 11786 and 'Black' column with 11432 values. As we don't know anything about the nature of missing values and their actual distribution among races we can't make any accurate correlation between the perp's race and incident occurrences. Handling these missing values require further analysis that may be outside the scope of this assignment.
+
+Now,let's look athe correlation matrix between numeric columns: 
+
+```{r correlation matrix}
+# Select numeric columns
+numeric_data <- nypd_data[,sapply(nypd_data, is.numeric)]
+
+# Remove NA values
+numeric_data <- numeric_data[complete.cases(numeric_data),]
+
+# Calculate correlations
+correlations <- cor(numeric_data)
+
+# Plot correlations
+corrplot(correlations, method="circle")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+For modeling, let's say we want to predict STATISTICAL_MURDER_FLAG based on the PRECINCT, PERP_AGE_GROUP, PERP_SEX and PERP_RACE. We could create a logistic regression model using the glm function in R.This script creates a logistic regression model, and prints out a summary of the model's coefficients, the statistical significance of each predictor, and various other statistics.
+
+```{r logistic regression }
+# Convert STATISTICAL_MURDER_FLAG to binary (0 or 1)
+nypd_data$STATISTICAL_MURDER_FLAG <- ifelse(nypd_data$STATISTICAL_MURDER_FLAG == "Yes", 1, 0)
+
+# Convert categorical variables to factors
+nypd_data$PERP_AGE_GROUP <- as.factor(nypd_data$PERP_AGE_GROUP)
+nypd_data$PERP_SEX <- as.factor(nypd_data$PERP_SEX)
+nypd_data$PERP_RACE <- as.factor(nypd_data$PERP_RACE)
+
+# Create logistic regression model
+model <- glm(STATISTICAL_MURDER_FLAG ~ PRECINCT + PERP_AGE_GROUP + PERP_SEX + PERP_RACE, data = nypd_data, family = binomial)
+
+# Show model summary
+summary(model)
+
+```
+As we can note almost all p values are close to 1. This means that there is not strong evidence to suggest that these variables have a non-zero effect on the outcome variable. In other words, the null hypothesis (that the true coefficient is zero, indicating no effect) would not be rejected for these predictors.
+
+However, remember that statistical significance does not necessarily imply practical or substantive significance. A variable could have a low p-value (i.e., it is statistically significant), but its actual effect on the outcome could be very small and potentially not meaningful in a practical sense. Conversely, a variable might have a high p-value but still have a substantial impact on the outcome variable.
+
+It's important to consider the context of your analysis and the specific domain knowledge when interpreting the significance of predictor variables. Sometimes, variables that are not statistically significant individually might still contribute meaningfully when combined with other variables in a multivariable model. In such cases, the overall model fit and predictive performance should be evaluated rather than relying solely on individual p-values.
+Further analysis can be done that may be outside the scope of this project.
+
+```{r session_info}
+sessionInfo()
+```
+
+
+
+
