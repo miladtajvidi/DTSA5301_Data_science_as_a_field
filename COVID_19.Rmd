@@ -1,0 +1,195 @@
+---
+title: "COVID_19"
+author: "Milad"
+date: "2023-07-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Importing Libraries
+
+```{r Libraries , warning=FALSE, message=FALSE}
+if (!require(tidyverse)) {
+  install.packages("tidyverse" , repos = "http://cran.us.r-project.org")
+}
+library(tidyverse)
+
+if (!require(lubridate)) {
+  install.packages("lubridate" , repos = "http://cran.us.r-project.org")
+}
+library(lubridate)
+```
+
+## Importing Data
+
+
+```{r Import}
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+file_names <- c("time_series_covid19_confirmed_global.csv","time_series_covid19_deaths_global.csv","time_series_covid19_confirmed_US.csv","time_series_covid19_deaths_US.csv")
+
+urls <- str_c(url_in, file_names)
+urls
+```
+
+## Defining different datasets
+
+```{r defining_datasets ,warning=FALSE, message=FALSE}
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+US_cases <- read_csv(urls[3])
+US_deaths <- read_csv(urls[4])
+```
+
+## Tidying up the datasets
+
+As stated in the lectures, we would like to tidy those datasets and put each variable (date, cases, deaths) in their own column. We will also get rid of the longitude and latitude attributes since we don't need themfor our analysis. We'll also rename Region and State. Note that by pivoting other columns, we are having each separate day as a row.
+
+```{r cleaning}
+global_cases <- global_cases %>%
+              pivot_longer(cols= -c('Province/State','Country/Region','Lat','Long'),
+                           names_to = "date",
+                           values_to = "cases") %>%
+              select(-c(Lat,Long))
+global_cases
+
+global_deaths <- global_deaths %>%
+              pivot_longer(cols= -c('Province/State','Country/Region','Lat','Long'),
+                           names_to = "date",
+                           values_to = "deaths") %>%
+              select(-c(Lat,Long))
+global_deaths
+
+```
+
+## Joining the global datasets
+
+```{r joining_global_datasets}
+
+global <- global_cases %>%
+          full_join(global_deaths) %>%
+          rename(Country_Region = 'Country/Region',
+                    Province_State = 'Province/State') %>%
+          mutate(date = mdy(date))
+
+global
+summary(global)
+
+```
+
+```{r further_cleaning_on_global_dataset}
+
+global <- global %>% filter(cases > 0)
+summary(global)
+```
+
+## Cleaning the US datasets
+
+```{r cleaning_US_datasets}
+US_cases %>% 
+        pivot_longer(cols= -(UID:Combined_Key),
+                     names_to = "date",
+                     values_to="cases") %>%
+        select(Admin2:cases) %>%
+        mutate(date=mdy(date)) %>%
+        select(-c(Lat, Long_))
+
+US_deaths %>% 
+        pivot_longer(cols= -(UID:Population),
+                     names_to = "date",
+                     values_to="deaths") %>%
+        select(Admin2:deaths) %>%
+        mutate(date=mdy(date)) %>%
+        select(-c(Lat, Long_))
+US_cases
+US_deaths
+
+```
+
+## Joining the US datasets
+
+```{r joining_us_datasets}
+US <- US_cases %>%
+      full_join(US_deaths)
+US
+```
+
+## Making the Global and US datasets compatible and adding the population
+
+```{r datasets_compatibility}
+global <- global %>% 
+          unite("Combined_Key",
+                c(Province_State, Country_Region),
+                sep = ", ",
+                na.rm = TRUE,
+                remove = FALSE)
+
+uid_lookup_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv"
+
+uid <- read_csv(uid_lookup_url) %>%
+        select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+
+global <- global %>% 
+          left_join(uid, by=c("Province_State", "Country_Region")) %>%
+          select(-c(UID, FIPS)) %>%
+          select(Province_State, Country_Region , date, 
+                 cases, deaths, Population,Combined_Key)
+
+global
+
+```
+
+## Visualizations
+
+```{r visual_1}
+selected_country <- "US"
+
+country_data <- global %>%
+  filter(Country_Region == selected_country)
+
+# Plot number of cases and deaths over time
+country_data %>%
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = cases), color = "blue") +
+  geom_line(aes(y = deaths), color = "red") +
+  scale_y_continuous(sec.axis = sec_axis(~. , name = "Deaths")) +
+  labs(x = "Date", y = "Cases", title = paste("COVID-19 in", selected_country))
+
+# Summarize data by country
+country_totals <- global %>%
+  group_by(Country_Region) %>%
+  summarise(total_cases = max(cases, na.rm = TRUE))
+
+# Plot total cases by country
+country_totals %>%
+  arrange(desc(total_cases)) %>%
+  head(10) %>%
+  ggplot(aes(x = reorder(Country_Region, -total_cases), y = total_cases)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(x = "Country", y = "Total Cases", title = "Total COVID-19 Cases by Country")
+
+```
+
+
+## Modeling the data
+
+```{r model}
+# Create a new variable for the number of days since the first case
+country_data <- country_data %>%
+  mutate(days_since_first_case = as.numeric(difftime(date, min(date, na.rm = TRUE), units = "days")))
+
+# Fit a linear regression model
+fit <- lm(cases ~ days_since_first_case, data = country_data)
+
+# Print the summary of the model
+summary(fit)
+```
+
+
+
+
+
